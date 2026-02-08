@@ -4,7 +4,7 @@
 ################################################################################
 
 variable "REGISTRY" {
-  default = "ghcr.io/slinkyproject"
+  default = "ghcr.io/vantagecompute"
 }
 
 variable "SUFFIX" {}
