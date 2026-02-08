@@ -92,6 +92,8 @@ set -xeuo pipefail
 mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control
 # Set library path so configure's AC_RUN_IFELSE test can find libs2n.so
 export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
+# Tell dh_shlibdeps to ignore missing dependency info for libs2n.so (installed from source, not a package)
+export DEB_DH_SHLIBDEPS_ARGS_ALL="--dpkg-shlibdeps-params=--ignore-missing-info"
 ( cd ${SLURM_DIR} && debuild -b -uc -us )
 EOR
 
