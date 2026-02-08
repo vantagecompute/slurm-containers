@@ -79,9 +79,16 @@ EOR
 
 # Patch debian/rules to add --with-s2n to dh_auto_configure options
 # The s2n library is installed to /usr/local, so we pass the explicit path
+# Also add override for dh_shlibdeps to ignore missing dependency info for libs2n.so
 RUN <<EOR
 set -xeuo pipefail
 sed -i 's|\(dh_auto_configure --\)|\1 --with-s2n=/usr/local|' ${SLURM_DIR}/debian/rules
+# Add dh_shlibdeps override to ignore missing libs2n.so dependency info
+cat >> ${SLURM_DIR}/debian/rules << 'EOF'
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
+EOF
 EOR
 
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#debuild
@@ -92,8 +99,6 @@ set -xeuo pipefail
 mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control
 # Set library path so configure's AC_RUN_IFELSE test can find libs2n.so
 export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
-# Tell dh_shlibdeps to ignore missing dependency info for libs2n.so (installed from source, not a package)
-export DEB_DH_SHLIBDEPS_ARGS_ALL="--dpkg-shlibdeps-params=--ignore-missing-info"
 ( cd ${SLURM_DIR} && debuild -b -uc -us )
 EOR
 
