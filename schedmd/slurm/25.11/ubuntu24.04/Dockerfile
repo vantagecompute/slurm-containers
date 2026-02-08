@@ -78,9 +78,10 @@ rm -rf /tmp/s2n-tls
 EOR
 
 # Patch debian/rules to add --with-s2n to dh_auto_configure options
+# The s2n library is installed to /usr/local, so we pass the explicit path
 RUN <<EOR
 set -xeuo pipefail
-sed -i 's/\(dh_auto_configure --\)/\1 --with-s2n/' ${SLURM_DIR}/debian/rules
+sed -i 's|\(dh_auto_configure --\)|\1 --with-s2n=/usr/local|' ${SLURM_DIR}/debian/rules
 EOR
 
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#debuild
