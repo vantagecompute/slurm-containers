@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       slurm_version:
-        description: 'SLURM version (e.g., 25.11.0, 25.11-latest)'
+        description: 'SLURM version (e.g., 25.11.2, 25.11.1)'
         required: false
-        default: '25.11-latest'
+        default: '25.11.2'
       push_images:
         description: 'Push images to registry'
         required: false
@@ -27,8 +27,8 @@ on:
 
 env:
   REGISTRY: ghcr.io/vantagecompute
-  # Default to 25.11 for ubuntu24.04
-  SLURM_VERSION: ${{ github.event.inputs.slurm_version || '25.11-latest' }}
+  # Default to latest 25.11.x release
+  SLURM_VERSION: ${{ github.event.inputs.slurm_version || '25.11.2' }}
 
 jobs:
   build-ubuntu2404:
