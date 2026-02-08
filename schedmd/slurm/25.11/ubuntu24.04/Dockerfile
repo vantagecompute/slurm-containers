@@ -89,8 +89,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
 # Build Slurm with s2n TLS support
 set -xeuo pipefail
-mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control >/dev/null
-( cd ${SLURM_DIR} && debuild -b -uc -us >/dev/null )
+mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control
+# Set library path so configure's AC_RUN_IFELSE test can find libs2n.so
+export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
+( cd ${SLURM_DIR} && debuild -b -uc -us )
 EOR
 
 ################################################################################
