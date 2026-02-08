@@ -54,19 +54,27 @@ EOR
 
 COPY --from=slurm-src /workspace/${SLURM_DIR} ${SLURM_DIR}
 
-# Install libs2n-dev for TLS support (s2n plugin)
+# Build s2n-tls from source for TLS support
+# Ref: https://slurm.schedmd.com/tls.html
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
-# Install s2n library for TLS plugin
+# Install s2n-tls build dependencies
 set -xeuo pipefail
 apt-get -qq update
-apt-get -qq -y install --no-install-recommends libs2n-dev
+apt-get -qq -y install --no-install-recommends \
+  cmake git ca-certificates libssl-dev
 EOR
 
-# Patch debian/control to add libs2n-dev to Build-Depends for s2n TLS support
 RUN <<EOR
+# Build and install s2n-tls
 set -xeuo pipefail
-sed -i 's/^\(Build-Depends:.*\)$/\1, libs2n-dev/' ${SLURM_DIR}/debian/control
+git clone --depth 1 https://github.com/aws/s2n-tls.git /tmp/s2n-tls
+cd /tmp/s2n-tls
+cmake . -B build/ -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+cmake --build build/ -j $(nproc)
+cmake --install build/
+ldconfig
+rm -rf /tmp/s2n-tls
 EOR
 
 # Patch debian/rules to add --with-s2n to dh_auto_configure options
@@ -117,6 +125,10 @@ done
 EOR
 
 COPY --from=build /tmp/*.deb /tmp/*.ddeb /tmp/
+
+# Copy s2n-tls shared libraries from build stage (required for tls_s2n.so plugin)
+COPY --from=build /usr/local/lib/libs2n.so* /usr/local/lib/
+RUN ldconfig
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
