@@ -54,10 +54,31 @@ EOR
 
 COPY --from=slurm-src /workspace/${SLURM_DIR} ${SLURM_DIR}
 
+# Install libs2n-dev for TLS support (s2n plugin)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
+# Install s2n library for TLS plugin
+set -xeuo pipefail
+apt-get -qq update
+apt-get -qq -y install --no-install-recommends libs2n-dev
+EOR
+
+# Patch debian/control to add libs2n-dev to Build-Depends for s2n TLS support
+RUN <<EOR
+set -xeuo pipefail
+sed -i 's/^\(Build-Depends:.*\)$/\1, libs2n-dev/' ${SLURM_DIR}/debian/control
+EOR
+
+# Patch debian/rules to add --with-s2n to dh_auto_configure options
+RUN <<EOR
+set -xeuo pipefail
+sed -i 's/\(dh_auto_configure --\)/\1 --with-s2n/' ${SLURM_DIR}/debian/rules
+EOR
+
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#debuild
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
-# Build Slurm
+# Build Slurm with s2n TLS support
 set -xeuo pipefail
 mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control >/dev/null
 ( cd ${SLURM_DIR} && debuild -b -uc -us >/dev/null )
