@@ -88,7 +88,7 @@ jobs:
           context: schedmd/slurm/25.11/ubuntu24.04
           file: schedmd/slurm/25.11/ubuntu24.04/Dockerfile
           target: ${{ matrix.target }}
-          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_images == 'true') }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/') || startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_images == 'true') }}
           tags: ${{ steps.version.outputs.tags }}
           build-args: |
             SLURM_VERSION=${{ steps.version.outputs.version }}
