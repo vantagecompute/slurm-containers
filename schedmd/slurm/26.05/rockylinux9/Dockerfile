@@ -51,14 +51,45 @@ EOR
 
 COPY --from=slurm-src /workspace/${SLURM_DIR} ${SLURM_DIR}
 
+# Build s2n-tls from source for TLS support
+# Ref: https://slurm.schedmd.com/tls.html
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<EOR
+# Install s2n-tls build dependencies
+set -xeuo pipefail
+dnf -q -y install --setopt='install_weak_deps=False' \
+  cmake git ca-certificates openssl-devel
+EOR
+
+RUN <<EOR
+# Build and install s2n-tls
+set -xeuo pipefail
+git clone --depth 1 https://github.com/aws/s2n-tls.git /tmp/s2n-tls
+cd /tmp/s2n-tls
+cmake . -B build/ -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_LIBDIR=lib
+cmake --build build/ -j $(nproc)
+cmake --install build/
+ldconfig
+rm -rf /tmp/s2n-tls
+EOR
+
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#rpmbuild
 RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<EOR
-# Build Slurm
+# Build Slurm with s2n TLS support
 set -xeuo pipefail
 SLURM_RPM_DIR="$(rpmspec -q ${SLURM_DIR}/slurm.spec 2> /dev/null | grep -Eo "slurm-[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+(-[[:alnum:]]+)?" | head -n1 | sed -E 's/-[[:digit:]]+$//g')"
 if [ "${SLURM_DIR}" != "$SLURM_RPM_DIR" ]; then
   mv ${SLURM_DIR} $SLURM_RPM_DIR
 fi
+awk '
+  /--enable-pkgconfig \\/ {
+    print
+    print "\t--with-s2n=/usr/local \\"
+    next
+  }
+  { print }
+' ${SLURM_RPM_DIR}/slurm.spec > ${SLURM_RPM_DIR}/slurm.spec.tmp
+mv ${SLURM_RPM_DIR}/slurm.spec.tmp ${SLURM_RPM_DIR}/slurm.spec
+sed -i 's#^\(%global __requires_exclude .*\)$#\1|libs2n.so#' ${SLURM_RPM_DIR}/slurm.spec
 rm -f ${SLURM_RPM_DIR}.tar.bz2
 tar -caf ${SLURM_RPM_DIR}.tar.bz2 $SLURM_RPM_DIR
 dnf -y builddep \
@@ -79,6 +110,7 @@ dnf -y builddep \
 ## FIXME: remove package installations after RPM spec makes them dependencies: --with-hdf5
 dnf -q -y install --setopt='install_weak_deps=False' \
   hdf5-devel
+export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
 rpmbuild -ta --with slurmrestd --with jwt ${SLURM_RPM_DIR}.tar.bz2 >/dev/null
 EOR
 
@@ -114,6 +146,10 @@ EOR
 
 COPY --from=build /root/rpmbuild/RPMS/**/*.rpm /tmp/
 
+# Copy s2n-tls shared libraries from build stage (required for tls_s2n.so plugin)
+COPY --from=build /usr/local/lib/libs2n.so* /usr/local/lib/
+RUN ldconfig
+
 RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<EOR
 # Install Dependencies
 set -xeuo pipefail
@@ -127,7 +163,7 @@ dnf -q -y install --setopt='install_weak_deps=False' \
   supervisor tini
 # Debug
 dnf -q -y install --setopt='install_weak_deps=False' \
-  procps-ng iputils ncurses
+  procps-ng iputils ncurses openssl
 EOR
 
 ################################################################################
@@ -187,7 +223,7 @@ set -xeuo pipefail
 dnf -q -y install --setopt='install_weak_deps=False' \
   gawk socat \
   openssh-server \
-  authselect sssd sssd-ad sssd-ldap \
+  authselect sssd sssd-ad sssd-ldap sssd-client \
   ./slurm-devel-[0-9]*.rpm \
   ./slurm-libpmi-[0-9]*.rpm \
   ./slurm-pam_slurm-[0-9]*.rpm \
@@ -326,7 +362,7 @@ set -xeuo pipefail
 dnf -q -y install --setopt='install_weak_deps=False' \
   socat \
   openssh-server \
-  authselect sssd sssd-ad sssd-ldap
+  authselect sssd sssd-ad sssd-ldap sssd-client
 # Configure
 mkdir -p /etc/authselect
 authselect select sssd with-mkhomedir --force

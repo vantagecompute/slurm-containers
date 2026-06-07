@@ -54,13 +54,48 @@ EOR
 
 COPY --from=slurm-src /workspace/${SLURM_DIR} ${SLURM_DIR}
 
+# Build s2n-tls from source for TLS support
+# Ref: https://slurm.schedmd.com/tls.html
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
+# Install s2n-tls build dependencies
+set -xeuo pipefail
+apt-get -qq update
+apt-get -qq -y install --no-install-recommends \
+  cmake git ca-certificates libssl-dev
+EOR
+
+RUN <<EOR
+# Build and install s2n-tls
+set -xeuo pipefail
+git clone --depth 1 https://github.com/aws/s2n-tls.git /tmp/s2n-tls
+cd /tmp/s2n-tls
+cmake . -B build/ -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_LIBDIR=lib
+cmake --build build/ -j $(nproc)
+cmake --install build/
+ldconfig
+rm -rf /tmp/s2n-tls
+EOR
+
+# Patch debian/rules to add --with-s2n to dh_auto_configure options.
+RUN <<EOR
+set -xeuo pipefail
+sed -i 's|\(dh_auto_configure --\)|\1 --with-s2n=/usr/local|' ${SLURM_DIR}/debian/rules
+cat >> ${SLURM_DIR}/debian/rules << 'EOF'
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
+EOF
+EOR
+
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#debuild
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
-# Build Slurm
+# Build Slurm with s2n TLS support
 set -xeuo pipefail
-mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control >/dev/null
-( cd ${SLURM_DIR} && debuild -b -uc -us >/dev/null )
+mk-build-deps -ir --tool='apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' ${SLURM_DIR}/debian/control
+export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
+( cd ${SLURM_DIR} && debuild -b -uc -us )
 EOR
 
 ################################################################################
@@ -97,6 +132,10 @@ EOR
 
 COPY --from=build /tmp/*.deb /tmp/*.ddeb /tmp/
 
+# Copy s2n-tls shared libraries from build stage (required for tls_s2n.so plugin)
+COPY --from=build /usr/local/lib/libs2n.so* /usr/local/lib/
+RUN ldconfig
+
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked <<EOR
 # Install Dependencies
@@ -108,7 +147,7 @@ apt-get -qq -y install --no-install-recommends \
   supervisor tini
 # Debug
 apt-get -qq -y install --no-install-recommends \
-  procps iputils-ping ncurses-bin
+  procps iputils-ping ncurses-bin openssl
 EOR
 
 ################################################################################

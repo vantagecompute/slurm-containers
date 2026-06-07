@@ -1,0 +1,191 @@
+# SPDX-FileCopyrightText: Copyright (C) Vantage Compute, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Build SLURM Images with s2n TLS
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+    tags:
+      - 'v26.05.*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: 'Push images to registry'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io/vantagecompute
+  SLURM_SERIES: '26.05'
+  SLURM_VERSION: '26.05.0'
+  SLURM_VERSION_MICRO: '1'
+
+jobs:
+  build-slurm2605:
+    name: Build Slurm 26.05 (${{ matrix.linux_flavor }}, ${{ matrix.target }}, ${{ matrix.architecture }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        linux_flavor:
+          - rockylinux9
+          - ubuntu26.04
+        architecture:
+          - amd64
+          - arm64
+        target:
+          - slurmctld
+          - slurmdbd
+          - slurmrestd
+          - slurmd
+          - sackd
+          - login
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.architecture == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version info
+        id: version
+        run: |
+          VERSION="${{ env.SLURM_VERSION }}"
+          SERIES="${{ env.SLURM_SERIES }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "series=${SERIES}" >> $GITHUB_OUTPUT
+          
+          # Generate architecture-specific image tags. The manifest job assembles
+          # final multi-architecture tags from these per-arch images.
+          TAGS="${{ env.REGISTRY }}/${{ matrix.architecture }}/${{ matrix.target }}:${SERIES}-${{ matrix.linux_flavor }},${{ env.REGISTRY }}/${{ matrix.architecture }}/${{ matrix.target }}:${VERSION}-${{ matrix.linux_flavor }}"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: schedmd/slurm/${{ steps.version.outputs.series }}/${{ matrix.linux_flavor }}
+          file: schedmd/slurm/${{ steps.version.outputs.series }}/${{ matrix.linux_flavor }}/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.architecture }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v26.05.') || github.event.inputs.push_images == 'true') }}
+          tags: ${{ steps.version.outputs.tags }}
+          build-args: |
+            SLURM_VERSION=${{ steps.version.outputs.version }}
+            SLURM_VERSION_MICRO=${{ env.SLURM_VERSION_MICRO }}
+          cache-from: type=gha,scope=${{ matrix.linux_flavor }}-${{ matrix.target }}-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.linux_flavor }}-${{ matrix.target }}-${{ matrix.architecture }}
+          labels: |
+            org.opencontainers.image.title=Vantage SLURM ${{ matrix.target }}
+            org.opencontainers.image.description=SLURM ${{ matrix.target }} with s2n TLS support
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.source=https://github.com/vantagecompute/slurm-containers
+            org.opencontainers.image.vendor=Vantage Compute, Inc.
+
+  publish-manifests:
+    name: Publish Slurm 26.05 manifests (${{ matrix.linux_flavor }})
+    runs-on: ubuntu-latest
+    needs:
+      - build-slurm2605
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v26.05.') || github.event.inputs.push_images == 'true') }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        linux_flavor:
+          - rockylinux9
+          - ubuntu26.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Create multi-architecture manifests
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          BAKE_IMPORTS: --file ./docker-bake.hcl --file ./26.05/${{ matrix.linux_flavor }}/slurm.hcl
+          BAKE_TARGET: core
+        run: ./hack/manifest.sh --dir schedmd/slurm --amd64 --arm64 --push --sign
+
+  # Check for new upstream releases (runs weekly)
+  check-upstream:
+    name: Check Upstream Releases
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for new SLURM releases
+        id: check
+        run: |
+          # Get latest release from SchedMD/slurm
+          LATEST=$(curl -s https://api.github.com/repos/SchedMD/slurm/releases/latest | jq -r .tag_name)
+          echo "Latest upstream SLURM release: ${LATEST}"
+          echo "latest=${LATEST}" >> $GITHUB_OUTPUT
+          
+          # Check if we have this version tagged
+          if git tag -l | grep -q "^v${LATEST#slurm-}$"; then
+            echo "Already have this version"
+            echo "new_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New release available!"
+            echo "new_release=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue for new release
+        if: steps.check.outputs.new_release == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const latest = '${{ steps.check.outputs.latest }}';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `New SLURM release available: ${latest}`,
+              body: `A new SLURM release is available upstream: ${latest}\n\nPlease update the Dockerfiles and create a new release.`,
+              labels: ['upstream-update']
+            });
