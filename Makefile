@@ -1,4 +1,15 @@
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+
 ##@ General
+
+# Get the OS to set platform specific commands
+UNAME_S ?= $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	SED = gsed
+else
+	SED = sed
+endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -6,6 +17,11 @@
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 REGISTRY ?= slinky.slurm.net
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
 
 # The help target prints out all targets with their descriptions organized
 # beneath their categories. The categories are represented by '##@' and the
@@ -57,8 +73,8 @@ generate-docs: pandoc-bin
 	cat ./docs/_static/toc.rst >> docs/index.rst
 	printf '\n' >> docs/index.rst
 	find docs -type f -name "*.md" -exec basename {} \; | awk '{print "    "$$1}' | env LC_ALL=C sort >> docs/index.rst
-	sed -i -E '/<.\/docs\/[A-Za-z]*.md/s/.\/docs\///g' docs/index.rst
-	sed -i -E '/<[A-Za-z]*.md>`/s/.md>/.html>/g' docs/index.rst
+	$(SED) -i -E '/<.\/docs\/[A-Za-z]*.md/s/.\/docs\///g' docs/index.rst
+	$(SED) -i -E '/<[A-Za-z]*.md>`/s/.md>/.html>/g' docs/index.rst
 
 DOCS_IMAGE ?= $(REGISTRY)/sphinx
 
@@ -69,3 +85,24 @@ build-docs: ## Build the container image used to develop the docs
 .PHONY: run-docs
 run-docs: build-docs ## Run the container image for docs development
 	$(CONTAINER_TOOL) run --rm --network host -v ./docs:/docs:z $(DOCS_IMAGE) sphinx-autobuild --port 8000 /docs /build/html
+
+## Location to locally build documentation
+LOCALBUILD ?= $(shell pwd)/build-docs
+$(LOCALBUILD):
+	mkdir -p $(LOCALBUILD)
+
+.PHONY: sphinx-build
+sphinx-build: sphinx-install $(LOCALBIN) $(LOCALBUILD)
+	source $(LOCALBIN)/sphinx-venv/bin/activate ;\
+	sphinx-build -M html docs $(LOCALBUILD) ;\
+	deactivate ;\
+
+.PHONY: sphinx-install
+sphinx-install: sphinx-venv
+	source $(LOCALBIN)/sphinx-venv/bin/activate ;\
+	pip install -r docs/requirements.txt ;\
+	deactivate ;\
+
+.PHONY: sphinx-venv
+sphinx-venv: $(LOCALBIN)
+	python3 -m venv $(LOCALBIN)/sphinx-venv

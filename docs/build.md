@@ -10,6 +10,7 @@
     - [Compatibility](#compatibility)
   - [Slurm](#slurm)
     - [With Custom Registry](#with-custom-registry)
+  - [SSSD](#sssd)
   - [Development](#development)
   - [Multiple Architectures](#multiple-architectures)
     - [Emulation (QEMU)](#emulation-qemu)
@@ -39,11 +40,11 @@ docker bake $BAKE_IMPORTS --print
 docker bake $BAKE_IMPORTS
 ```
 
-For example, the following will build Slurm 25.11 on Rocky Linux 9.
+For example, the following will build Slurm 26.05 on Rocky Linux 9.
 
 ```sh
 cd ./schedmd/slurm/
-export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./25.11/rockylinux9/slurm.hcl"
+export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./26.05/rockylinux9/slurm.hcl"
 docker bake $BAKE_IMPORTS --print
 docker bake $BAKE_IMPORTS
 ```
@@ -65,6 +66,26 @@ Build Slurm from the selected Slurm version and Linux flavor.
 export REGISTRY="my/registry"
 cd ./schedmd/slurm/
 export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./$VERSION/$FLAVOR/slurm.hcl"
+docker bake $BAKE_IMPORTS --print
+docker bake $BAKE_IMPORTS
+```
+
+## SSSD
+
+Build SSSD from Ubuntu 26.04.
+
+```sh
+cd ./schedmd/sssd/
+export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./ubuntu26.04/sssd.hcl"
+docker bake $BAKE_IMPORTS --print
+docker bake $BAKE_IMPORTS
+```
+
+For example:
+
+```sh
+cd ./schedmd/sssd/
+export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./ubuntu26.04/sssd.hcl"
 docker bake $BAKE_IMPORTS --print
 docker bake $BAKE_IMPORTS
 ```
@@ -177,10 +198,10 @@ docker bake $BAKE_IMPORTS --builder multiarch multiarch
 ## Extending the images with additional software
 
 Image build stages may also be added or modified to manage custom software
-present in images. It is generally advisible to keep the size and complexity of
+present in images. It is generally advisable to keep the size and complexity of
 each stage minimal, in order to reduce image build time and improve the number
-of stages that can be re-used between builds. Furthermore, changes should be
-made in the most specific stage possible. For example, installing JupyterLab for
+of stages that can be reused between builds. Furthermore, changes should be made
+in the most specific stage possible. For example, installing JupyterLab for
 users should be done in a layer that is specific to the `slurmd` or `login`
 targets, so that it is not installed unnecessarily in `slurmctld` or `slurmdbd`
 images, increasing image size.
@@ -207,7 +228,7 @@ After modifying the `base-extra` layer, build the `slurmd` and `login` images:
 
 ```bash
 cd ./schedmd/slurm/
-export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./25.05/rockylinux9/slurm.hcl"
+export BAKE_IMPORTS="--file ./docker-bake.hcl --file ./26.05/rockylinux9/slurm.hcl"
 docker bake $BAKE_IMPORTS slurmd login --print
 docker bake $BAKE_IMPORTS slurmd login
 ```
