@@ -45,6 +45,9 @@ target "_slurm" {
     SLURM_VERSION = slurm_version
     SLURM_VERSION_MICRO = slurm_version_micro
   }
+  contexts = {
+    "slurm-shared" = "."
+  }
   labels = {
     # Ref: https://github.com/opencontainers/image-spec/blob/v1.0/annotations.md
     "org.opencontainers.image.authors" = "slinky@schedmd.com"
