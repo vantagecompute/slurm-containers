@@ -108,7 +108,7 @@ apt-get -qq -y install --no-install-recommends \
   supervisor tini
 # Debug
 apt-get -qq -y install --no-install-recommends \
-  procps iputils-ping ncurses-bin
+  procps iputils-ping ncurses-bin openssl
 EOR
 
 ################################################################################
