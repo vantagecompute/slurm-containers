@@ -53,6 +53,8 @@ apt-get -qq -y install --no-install-recommends \
 EOR
 
 COPY --from=slurm-src /workspace/${SLURM_DIR} ${SLURM_DIR}
+COPY --from=slurm-shared /scripts/s2n/build-and-install.sh /usr/local/bin/build-and-install-s2n.sh
+COPY --from=slurm-shared /scripts/s2n/enable-slurm-debian-s2n.sh /usr/local/bin/enable-slurm-debian-s2n.sh
 
 # Build s2n-tls from source for TLS support
 # Ref: https://slurm.schedmd.com/tls.html
@@ -68,13 +70,7 @@ EOR
 RUN <<EOR
 # Build and install s2n-tls
 set -xeuo pipefail
-git clone --depth 1 https://github.com/aws/s2n-tls.git /tmp/s2n-tls
-cd /tmp/s2n-tls
-cmake . -B build/ -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
-cmake --build build/ -j $(nproc)
-cmake --install build/
-ldconfig
-rm -rf /tmp/s2n-tls
+/usr/local/bin/build-and-install-s2n.sh
 EOR
 
 # Patch debian/rules to add --with-s2n to dh_auto_configure options
@@ -82,13 +78,7 @@ EOR
 # Also add override for dh_shlibdeps to ignore missing dependency info for libs2n.so
 RUN <<EOR
 set -xeuo pipefail
-sed -i 's|\(dh_auto_configure --\)|\1 --with-s2n=/usr/local|' ${SLURM_DIR}/debian/rules
-# Add dh_shlibdeps override to ignore missing libs2n.so dependency info
-cat >> ${SLURM_DIR}/debian/rules << 'EOF'
-
-override_dh_shlibdeps:
-	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
-EOF
+/usr/local/bin/enable-slurm-debian-s2n.sh ${SLURM_DIR}
 EOR
 
 # Ref: https://slurm.schedmd.com/quickstart_admin.html#debuild
@@ -151,7 +141,7 @@ apt-get -qq -y install --no-install-recommends \
   supervisor tini
 # Debug
 apt-get -qq -y install --no-install-recommends \
-  procps iputils-ping ncurses-bin openssl
+  procps iputils-ping ncurses-bin
 EOR
 
 ################################################################################
