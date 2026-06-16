@@ -40,6 +40,7 @@ jobs:
       matrix:
         linux_flavor:
           - rockylinux9
+          - ubuntu24.04
           - ubuntu26.04
         architecture:
           - amd64
@@ -123,6 +124,7 @@ jobs:
       matrix:
         linux_flavor:
           - rockylinux9
+          - ubuntu24.04
           - ubuntu26.04
 
     steps:
@@ -147,6 +149,123 @@ jobs:
           REGISTRY: ${{ env.REGISTRY }}
           BAKE_IMPORTS: --file ./docker-bake.hcl --file ./26.05/${{ matrix.linux_flavor }}/slurm.hcl
           BAKE_TARGET: core
+        run: ./hack/manifest.sh --dir schedmd/slurm --amd64 --arm64 --push --sign
+
+  build-pyxis:
+    name: Build Pyxis (${{ matrix.linux_flavor }}, ${{ matrix.target }}, ${{ matrix.architecture }})
+    runs-on: ubuntu-latest
+    needs:
+      - publish-manifests
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v26.05.') || github.event.inputs.push_images == 'true') }}
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        linux_flavor:
+          - rockylinux9
+          - ubuntu24.04
+          - ubuntu26.04
+        architecture:
+          - amd64
+          - arm64
+        target:
+          - slurmd-pyxis
+          - login-pyxis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.architecture == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version info
+        id: version
+        run: |
+          VERSION="${{ env.SLURM_VERSION }}"
+          SERIES="${{ env.SLURM_SERIES }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "series=${SERIES}" >> $GITHUB_OUTPUT
+          TAGS="${{ env.REGISTRY }}/${{ matrix.architecture }}/${{ matrix.target }}:${SERIES}-${{ matrix.linux_flavor }},${{ env.REGISTRY }}/${{ matrix.architecture }}/${{ matrix.target }}:${VERSION}-${{ matrix.linux_flavor }}"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: schedmd/slurm/${{ steps.version.outputs.series }}/${{ matrix.linux_flavor }}
+          file: schedmd/slurm/${{ steps.version.outputs.series }}/${{ matrix.linux_flavor }}/Dockerfile.pyxis
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.architecture }}
+          push: true
+          tags: ${{ steps.version.outputs.tags }}
+          build-args: |
+            REGISTRY=${{ env.REGISTRY }}
+          cache-from: type=gha,scope=${{ matrix.linux_flavor }}-${{ matrix.target }}-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.linux_flavor }}-${{ matrix.target }}-${{ matrix.architecture }}
+          labels: |
+            org.opencontainers.image.title=Vantage SLURM ${{ matrix.target }}
+            org.opencontainers.image.description=SLURM ${{ matrix.target }} with Pyxis/Enroot and NVIDIA Container Toolkit
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.source=https://github.com/vantagecompute/slurm-containers
+            org.opencontainers.image.vendor=Vantage Compute, Inc.
+
+  publish-pyxis-manifests:
+    name: Publish Pyxis manifests (${{ matrix.linux_flavor }})
+    runs-on: ubuntu-latest
+    needs:
+      - build-pyxis
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v26.05.') || github.event.inputs.push_images == 'true') }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        linux_flavor:
+          - rockylinux9
+          - ubuntu24.04
+          - ubuntu26.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Create multi-architecture manifests
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          BAKE_IMPORTS: --file ./docker-bake.hcl --file ./26.05/${{ matrix.linux_flavor }}/slurm.hcl
+          BAKE_TARGET: extras
         run: ./hack/manifest.sh --dir schedmd/slurm --amd64 --arm64 --push --sign
 
   # Check for new upstream releases (runs weekly)
